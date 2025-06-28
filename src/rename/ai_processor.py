@@ -4,6 +4,7 @@ from typing import Dict, List, Optional, Tuple
 from ..logger import logger
 from ..ai.client import AIClient
 from ..ai.video_analyzer import VideoAnalyzer
+from ..ai.models import AIAnalysisResult
 from .utils import VIDEO_SUFFIX
 
 
@@ -19,7 +20,7 @@ class AIProcessor:
         path: Path,
         anime_info: Dict,
         season_info: Optional[Dict] = None
-    ) -> Optional[Dict]:
+    ) -> Optional[AIAnalysisResult]:
         """
         使用AI分析动漫文件的映射关系
         
@@ -29,7 +30,7 @@ class AIProcessor:
             season_info: 特定季度信息
             
         Returns:
-            AI分析结果
+            验证后的AI分析结果
         """
         if not self.ai_client.is_available():
             logger.info('[AI处理] AI功能未启用，跳过AI分析')
@@ -50,17 +51,17 @@ class AIProcessor:
         )
         
         if ai_result:
-            logger.info(f'[AI处理] AI分析完成，置信度: {ai_result.get("confidence", 0):.2f}')
+            logger.info(f'[AI处理] AI分析完成，置信度: {ai_result.confidence:.2f}')
             
             # 记录低置信度结果到单独日志
-            if ai_result.get('confidence', 0) < self.ai_client.confidence_threshold:
+            if ai_result.confidence < self.ai_client.confidence_threshold:
                 self._log_low_confidence_result(path, ai_result)
         
         return ai_result
     
     def apply_ai_mapping(
         self,
-        ai_result: Dict,
+        ai_result: AIAnalysisResult,
         work_path: Path,
         original_mapping: Dict[Path, Path]
     ) -> Dict[Path, Path]:
@@ -68,25 +69,29 @@ class AIProcessor:
         应用AI分析结果到文件映射
         
         Args:
-            ai_result: AI分析结果
+            ai_result: 验证后的AI分析结果
             work_path: 工作目录路径
             original_mapping: 原始文件映射
             
         Returns:
             更新后的文件映射
         """
-        if not ai_result or not ai_result.get('mapping'):
+        if not ai_result or not ai_result.mapping:
             return original_mapping
         
         updated_mapping = original_mapping.copy()
         
         try:
-            for mapping in ai_result['mapping']:
-                local_file = mapping.get('local_file')
-                tmdb_season = mapping.get('tmdb_season', 1)
-                tmdb_episode = mapping.get('tmdb_episode', 1)
-                episode_type = mapping.get('episode_type', 'regular')
-                confidence = mapping.get('confidence', 0)
+            # 记录季度映射信息
+            if ai_result.season_mapping:
+                logger.info(f'[AI处理] 季度映射: {ai_result.season_mapping}')
+            
+            for mapping in ai_result.mapping:
+                local_file = mapping.local_file
+                tmdb_season = mapping.tmdb_season
+                tmdb_episode = mapping.tmdb_episode
+                episode_type = mapping.episode_type
+                confidence = mapping.confidence
                 
                 # 找到对应的本地文件
                 source_path = None
@@ -96,6 +101,7 @@ class AIProcessor:
                         break
                 
                 if not source_path:
+                    logger.warning(f'[AI处理] 未找到本地文件: {local_file}')
                     continue
                 
                 # 根据类型确定目标目录
@@ -120,7 +126,7 @@ class AIProcessor:
                 
                 logger.info(
                     f'[AI处理] AI映射: {source_path.name} -> {new_filename} '
-                    f'(置信度: {confidence:.2f})'
+                    f'(类型: {episode_type}, 置信度: {confidence:.2f})'
                 )
         
         except Exception as e:
@@ -143,22 +149,29 @@ class AIProcessor:
         
         return sorted(video_files)
     
-    def _log_low_confidence_result(self, path: Path, ai_result: Dict):
+    def _log_low_confidence_result(self, path: Path, ai_result: AIAnalysisResult):
         """记录低置信度结果到单独日志"""
-        confidence = ai_result.get('confidence', 0)
-        reason = ai_result.get('reason', '无理由说明')
+        confidence = ai_result.confidence
+        reason = ai_result.reason
         
         logger.warning(
             f'[AI低置信度] 路径: {path} | 置信度: {confidence:.2f} | '
-            f'理由: {reason} | 映射数量: {len(ai_result.get("mapping", []))}'
+            f'理由: {reason} | 映射数量: {len(ai_result.mapping)}'
         )
         
+        # 记录季度映射
+        if ai_result.season_mapping:
+            logger.warning(f'[AI低置信度] 季度映射: {ai_result.season_mapping}')
+        
         # 详细记录每个映射的置信度
-        for mapping in ai_result.get('mapping', []):
-            file_confidence = mapping.get('confidence', 0)
-            if file_confidence < self.ai_client.confidence_threshold:
+        for mapping in ai_result.mapping:
+            if mapping.confidence < self.ai_client.confidence_threshold:
                 logger.warning(
-                    f'[AI低置信度文件] {mapping.get("local_file")} -> '
-                    f'S{mapping.get("tmdb_season", 1):02d}E{mapping.get("tmdb_episode", 1):02d} '
-                    f'(置信度: {file_confidence:.2f})'
+                    f'[AI低置信度文件] {mapping.local_file} -> '
+                    f'S{mapping.tmdb_season:02d}E{mapping.tmdb_episode:02d} '
+                    f'(类型: {mapping.episode_type}, 置信度: {mapping.confidence:.2f})'
                 )
+        
+        # 记录特殊说明
+        if ai_result.special_notes:
+            logger.warning(f'[AI低置信度] 特殊说明: {ai_result.special_notes}')

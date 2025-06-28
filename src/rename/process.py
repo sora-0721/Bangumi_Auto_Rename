@@ -454,7 +454,7 @@ class Rename:
                         path, tv_info, None
                     )
                     
-                    if ai_result and ai_result.get('confidence', 0) >= self.ai_processor.ai_client.confidence_threshold:
+                    if ai_result and ai_result.confidence >= self.ai_processor.ai_client.confidence_threshold:
                         logger.info('[处理任务] 使用AI分析结果进行文件映射')
                         # 先进行传统处理获得基础映射
                         self._process_traditional(path, rtpath_name, work_path, season_id)

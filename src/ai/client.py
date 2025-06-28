@@ -2,9 +2,11 @@ import json
 import re
 from typing import Dict, List, Optional, Tuple
 from openai import OpenAI
+from pydantic import ValidationError
 
 from ..logger import logger
 from ..config.config_manager import cm
+from .models import AIAnalysisResult, EpisodeMapping
 
 
 class AIClient:
@@ -26,6 +28,34 @@ class AIClient:
     def is_available(self) -> bool:
         """检查AI客户端是否可用"""
         return self.enabled and self.client is not None and bool(self.api_key)
+
+    def _extract_and_validate_json(self, content: str) -> Optional[AIAnalysisResult]:
+        """
+        从LLM响应中提取JSON内容并使用Pydantic验证
+        
+        Args:
+            content: LLM响应内容
+            
+        Returns:
+            验证后的AIAnalysisResult对象，失败返回None
+        """
+        # 首先提取JSON内容
+        json_data = self._extract_json_from_response(content)
+        if not json_data:
+            return None
+        
+        try:
+            # 使用Pydantic验证和解析
+            result = AIAnalysisResult(**json_data)
+            logger.info(f'[AI识别] JSON结构验证成功，置信度: {result.confidence:.2f}')
+            return result
+        except ValidationError as e:
+            logger.error(f'[AI识别] JSON结构验证失败: {e}')
+            logger.error(f'[AI识别] 原始数据: {json.dumps(json_data, ensure_ascii=False, indent=2)}')
+            return None
+        except Exception as e:
+            logger.error(f'[AI识别] 解析AI结果时发生未知错误: {str(e)}')
+            return None
 
     def _extract_json_from_response(self, content: str) -> Optional[Dict]:
         """
@@ -94,7 +124,7 @@ class AIClient:
         anime_info: Dict,
         local_files: List[Dict],
         season_info: Optional[Dict] = None
-    ) -> Optional[Dict]:
+    ) -> Optional[AIAnalysisResult]:
         """
         分析本地文件与TMDB剧集的映射关系
         
@@ -104,7 +134,7 @@ class AIClient:
             season_info: 特定季度信息（可选）
             
         Returns:
-            包含映射结果、置信度和理由的字典
+            验证后的AIAnalysisResult对象
         """
         if not self.is_available():
             logger.warning('[AI识别] AI功能未启用或配置不完整')
@@ -118,7 +148,7 @@ class AIClient:
                 messages=[
                     {
                         "role": "system",
-                        "content": "你是一个专业的动漫文件重命名助手。你需要分析本地动漫文件与TMDB数据库中剧集信息的对应关系，特别关注动漫BD发布与官方分季的差异。请以JSON格式返回分析结果，不要包含任何思维链或推理过程。"
+                        "content": "你是一个专业的动漫文件重命名助手。你需要分析本地动漫文件与TMDB数据库中剧集信息的对应关系，特别关注动漫BD发布与官方分季的差异。请严格按照指定的JSON格式返回分析结果，不要包含任何思维链或推理过程。"
                     },
                     {
                         "role": "user",
@@ -128,21 +158,21 @@ class AIClient:
                 temperature=0.1
             )
             
-            # 提取JSON内容，兼容思维链输出
-            result = self._extract_json_from_response(response.choices[0].message.content)
+            # 提取并验证JSON内容
+            result = self._extract_and_validate_json(response.choices[0].message.content)
             
             if not result:
-                logger.error('[AI识别] 无法解析AI响应为有效JSON')
+                logger.error('[AI识别] 无法解析或验证AI响应')
                 return None
             
             # 记录低置信度结果
-            if result.get('confidence', 0) < self.confidence_threshold:
+            if result.confidence < self.confidence_threshold:
                 logger.warning(
-                    f'[AI识别] 低置信度结果 (置信度: {result.get("confidence", 0):.2f}): '
-                    f'{result.get("reason", "无理由说明")}'
+                    f'[AI识别] 低置信度结果 (置信度: {result.confidence:.2f}): '
+                    f'{result.reason}'
                 )
             
-            logger.info(f'[AI识别] 分析完成，置信度: {result.get("confidence", 0):.2f}')
+            logger.info(f'[AI识别] 分析完成，置信度: {result.confidence:.2f}')
             return result
             
         except Exception as e:
@@ -196,24 +226,32 @@ class AIClient:
 4. 剧场版可能被混在TV版中
 5. 特典和CM的时长波动范围很大，不能仅根据时长判断类型
 
-请直接返回JSON格式的分析结果，包含以下字段：
+请严格按照以下JSON格式返回分析结果：
 {{
     "confidence": 0.85,
     "reason": "分析理由说明",
+    "season_mapping": {{
+        "local_season_1": 1,
+        "local_season_2": [2, 3]
+    }},
     "mapping": [
         {{
             "local_file": "文件名",
             "tmdb_season": 1,
             "tmdb_episode": 1,
-            "episode_type": "regular|special|ova|movie",
+            "episode_type": "regular",
             "confidence": 0.9
         }}
     ],
-    "season_mapping": {{
-        "local_season_1": 1,
-        "local_season_2": 2
-    }},
     "special_notes": "特殊情况说明"
 }}
+
+注意事项：
+- season_mapping中的键必须是"local_season_X"格式
+- season_mapping中的值可以是单个整数或整数列表
+- 本地的一个季可能对应TMDB的多个季（值为列表）
+- 本地的多个季可能对应TMDB的一个季（多个键对应同一个值）
+- episode_type只能是: "regular", "special", "ova", "movie"
+- 所有confidence值必须在0.0-1.0之间
 """
         return prompt
