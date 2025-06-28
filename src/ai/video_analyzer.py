@@ -51,6 +51,17 @@ class VideoAnalyzer:
                 'duration': VideoAnalyzer.get_video_duration(file_path)
             }
             
+            # 根据时长推测文件类型
+            if file_info['duration']:
+                if file_info['duration'] > 15:  # 大于15分钟认为是正片
+                    file_info['estimated_type'] = 'regular'
+                elif file_info['duration'] > 5:  # 5-15分钟可能是特典
+                    file_info['estimated_type'] = 'special'
+                else:  # 小于5分钟可能是PV/CM
+                    file_info['estimated_type'] = 'preview'
+            else:
+                file_info['estimated_type'] = 'unknown'
+            
             results.append(file_info)
             
         logger.info(f'[视频分析] 分析了 {len(results)} 个视频文件')

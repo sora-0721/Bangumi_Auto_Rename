@@ -1,5 +1,4 @@
 import json
-import re
 from typing import Dict, List, Optional, Tuple
 from openai import OpenAI
 
@@ -26,60 +25,6 @@ class AIClient:
     def is_available(self) -> bool:
         """检查AI客户端是否可用"""
         return self.enabled and self.client is not None and bool(self.api_key)
-
-    def _extract_json_from_response(self, content: str) -> Optional[Dict]:
-        """
-        从LLM响应中提取JSON，兼容带思维链的情况
-        
-        Args:
-            content: LLM响应内容
-            
-        Returns:
-            提取的JSON字典，失败返回None
-        """
-        try:
-            # 首先尝试直接解析整个内容
-            return json.loads(content)
-        except json.JSONDecodeError:
-            pass
-        
-        # 如果直接解析失败，尝试提取JSON部分
-        # 查找被```json```包围的JSON块
-        json_pattern = r'```json\s*(.*?)\s*```'
-        match = re.search(json_pattern, content, re.DOTALL | re.IGNORECASE)
-        if match:
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError:
-                pass
-        
-        # 查找被```包围的JSON块（不带json标识）
-        code_pattern = r'```\s*(.*?)\s*```'
-        match = re.search(code_pattern, content, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError:
-                pass
-        
-        # 查找第一个完整的JSON对象
-        # 从第一个{开始，找到匹配的}结束
-        start_idx = content.find('{')
-        if start_idx != -1:
-            brace_count = 0
-            for i, char in enumerate(content[start_idx:], start_idx):
-                if char == '{':
-                    brace_count += 1
-                elif char == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        try:
-                            return json.loads(content[start_idx:i+1])
-                        except json.JSONDecodeError:
-                            break
-        
-        logger.error(f'[AI识别] 无法从响应中提取有效JSON: {content[:200]}...')
-        return None
 
     def analyze_episode_mapping(
         self,
@@ -117,15 +62,11 @@ class AIClient:
                         "content": prompt
                     }
                 ],
-                temperature=0.1
+                temperature=0.1,
+                response_format={"type": "json_object"}
             )
             
-            # 使用新的JSON提取方法
-            result = self._extract_json_from_response(response.choices[0].message.content)
-            
-            if not result:
-                logger.error('[AI识别] 无法解析AI响应为有效JSON')
-                return None
+            result = json.loads(response.choices[0].message.content)
             
             # 记录低置信度结果
             if result.get('confidence', 0) < self.confidence_threshold:
@@ -186,8 +127,7 @@ class AIClient:
 2. OVA/特典可能被放在正片季度末尾，而非第0季
 3. 不同季度可能仅用名称区分，没有明确季号
 4. 剧场版可能被混在TV版中
-5. 特典和CM的时长波动范围很大，不能仅根据时长判断类型
-6. 需要综合文件名、时长、位置等多个因素进行判断
+5. 根据文件时长判断是否为正片（通常20-25分钟）还是特典/PV等
 
 请返回JSON格式的分析结果，包含以下字段：
 {{
@@ -208,7 +148,5 @@ class AIClient:
     }},
     "special_notes": "特殊情况说明"
 }}
-
-注意：请确保返回的是纯JSON格式，不要包含任何思维过程或解释文字。
 """
         return prompt
