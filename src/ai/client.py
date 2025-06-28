@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Dict, List, Optional, Tuple
 from openai import OpenAI
 
@@ -25,6 +26,68 @@ class AIClient:
     def is_available(self) -> bool:
         """检查AI客户端是否可用"""
         return self.enabled and self.client is not None and bool(self.api_key)
+
+    def _extract_json_from_response(self, content: str) -> Optional[Dict]:
+        """
+        从LLM响应中提取JSON内容，兼容思维链输出
+        
+        Args:
+            content: LLM响应内容
+            
+        Returns:
+            提取的JSON字典，失败返回None
+        """
+        try:
+            # 首先尝试直接解析整个内容
+            return json.loads(content)
+        except json.JSONDecodeError:
+            pass
+        
+        # 如果直接解析失败，尝试提取JSON部分
+        # 查找可能的JSON块
+        json_patterns = [
+            r'```json\s*(\{.*?\})\s*```',  # ```json {} ```
+            r'```\s*(\{.*?\})\s*```',      # ``` {} ```
+            r'(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})',  # 最外层的{}块
+        ]
+        
+        for pattern in json_patterns:
+            matches = re.findall(pattern, content, re.DOTALL)
+            for match in matches:
+                try:
+                    # 清理可能的思维链内容
+                    cleaned_match = self._clean_json_content(match)
+                    return json.loads(cleaned_match)
+                except json.JSONDecodeError:
+                    continue
+        
+        # 如果所有方法都失败，记录错误并返回None
+        logger.error(f'[AI识别] 无法从响应中提取有效JSON: {content[:200]}...')
+        return None
+
+    def _clean_json_content(self, json_str: str) -> str:
+        """
+        清理JSON字符串中可能的思维链内容
+        
+        Args:
+            json_str: 原始JSON字符串
+            
+        Returns:
+            清理后的JSON字符串
+        """
+        # 移除可能的思维链标记
+        thinking_patterns = [
+            r'<thinking>.*?</thinking>',
+            r'思考：.*?(?=\{)',
+            r'分析：.*?(?=\{)',
+            r'推理：.*?(?=\{)',
+        ]
+        
+        cleaned = json_str
+        for pattern in thinking_patterns:
+            cleaned = re.sub(pattern, '', cleaned, flags=re.DOTALL)
+        
+        return cleaned.strip()
 
     def analyze_episode_mapping(
         self,
@@ -55,18 +118,22 @@ class AIClient:
                 messages=[
                     {
                         "role": "system",
-                        "content": "你是一个专业的动漫文件重命名助手。你需要分析本地动漫文件与TMDB数据库中剧集信息的对应关系，特别关注动漫BD发布与官方分季的差异。请以JSON格式返回分析结果。"
+                        "content": "你是一个专业的动漫文件重命名助手。你需要分析本地动漫文件与TMDB数据库中剧集信息的对应关系，特别关注动漫BD发布与官方分季的差异。请以JSON格式返回分析结果，不要包含任何思维链或推理过程。"
                     },
                     {
                         "role": "user",
                         "content": prompt
                     }
                 ],
-                temperature=0.1,
-                response_format={"type": "json_object"}
+                temperature=0.1
             )
             
-            result = json.loads(response.choices[0].message.content)
+            # 提取JSON内容，兼容思维链输出
+            result = self._extract_json_from_response(response.choices[0].message.content)
+            
+            if not result:
+                logger.error('[AI识别] 无法解析AI响应为有效JSON')
+                return None
             
             # 记录低置信度结果
             if result.get('confidence', 0) < self.confidence_threshold:
@@ -127,11 +194,11 @@ class AIClient:
 2. OVA/特典可能被放在正片季度末尾，而非第0季
 3. 不同季度可能仅用名称区分，没有明确季号
 4. 剧场版可能被混在TV版中
-5. 根据文件时长判断是否为正片（通常20-25分钟）还是特典/PV等
+5. 特典和CM的时长波动范围很大，不能仅根据时长判断类型
 
-请返回JSON格式的分析结果，包含以下字段：
+请直接返回JSON格式的分析结果，包含以下字段：
 {{
-    "confidence": 0.85,  // 置信度 (0-1)
+    "confidence": 0.85,
     "reason": "分析理由说明",
     "mapping": [
         {{
@@ -143,7 +210,7 @@ class AIClient:
         }}
     ],
     "season_mapping": {{
-        "local_season_1": 1,  // 本地第1季对应TMDB第1季
+        "local_season_1": 1,
         "local_season_2": 2
     }},
     "special_notes": "特殊情况说明"
