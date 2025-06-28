@@ -12,6 +12,7 @@ from ..logger import logger
 from .get_info import Search
 from ..utils.path import TASK_PATH
 from ..config.config_manager import cm
+from .ai_processor import AIProcessor
 from .utils import S0_TAG, EXTRA_TAG, IGNORE_DIR, VIDEO_SUFFIX, IGNORE_SUFFIX
 from .cleaner import (
     remove_tag,
@@ -43,6 +44,7 @@ class Rename:
         self.ANIME_PATH.mkdir(parents=True, exist_ok=True)
         self.BANGUMI_PATH.mkdir(parents=True, exist_ok=True)
         self.search = Search()
+        self.ai_processor = AIProcessor()
 
         self.R = {}
 
@@ -444,38 +446,27 @@ class Rename:
                 if cus_season_id:
                     season_id = int(cus_season_id)
 
-                if path.is_file():
-                    logger.info(f'[处理任务] 开始对 [单文件] {path.name}处理')
-                    self.process_sub(
-                        rtpath_name,
-                        None,
-                        path,
-                        work_path,
-                        season_id,
+                # 【AI增强处理】
+                # 如果是动漫且启用了AI，使用AI分析文件映射
+                if is_anime and self.ai_processor.ai_client.is_available():
+                    logger.info('[处理任务] 启用AI分析动漫文件映射')
+                    ai_result = self.ai_processor.analyze_anime_files(
+                        path, tv_info, None
                     )
+                    
+                    if ai_result and ai_result.get('confidence', 0) >= self.ai_processor.ai_client.confidence_threshold:
+                        logger.info('[处理任务] 使用AI分析结果进行文件映射')
+                        # 先进行传统处理获得基础映射
+                        self._process_traditional(path, rtpath_name, work_path, season_id)
+                        # 然后应用AI优化
+                        self.R = self.ai_processor.apply_ai_mapping(ai_result, work_path, self.R)
+                    else:
+                        logger.info('[处理任务] AI置信度不足，使用传统方法处理')
+                        self._process_traditional(path, rtpath_name, work_path, season_id)
                 else:
-                    logger.info(f'[处理任务] 开始对 [文件夹] {path.name}处理')
-                    repeat = find_unique_parts_in_videos(path)
-                    for item_path in path.iterdir():
-                        logger.info(f'[处理任务] 处理嵌套文件夹 {item_path.name}')
-                        if item_path.is_dir():
-                            repeat_2 = find_unique_parts_in_videos(item_path)
-                            for sub_item in item_path.iterdir():
-                                self.process_sub(
-                                    rtpath_name,
-                                    repeat_2,
-                                    sub_item,
-                                    work_path,
-                                    season_id,
-                                )
-                        else:
-                            self.process_sub(
-                                rtpath_name,
-                                repeat,
-                                item_path,
-                                work_path,
-                                season_id,
-                            )
+                    # 传统处理方式
+                    self._process_traditional(path, rtpath_name, work_path, season_id)
+
         task_path = TASK_PATH / f'{_uuid}.json'
         task_data = {
             'path': str(path),
@@ -500,6 +491,41 @@ class Rename:
         with open(task_path, 'w', encoding='UTF-8') as file:
             json.dump(task_data, file, indent=4, ensure_ascii=False)
         return True
+
+    def _process_traditional(self, path: Path, rtpath_name: str, work_path: Path, season_id: int):
+        """传统处理方式"""
+        if path.is_file():
+            logger.info(f'[处理任务] 开始对 [单文件] {path.name}处理')
+            self.process_sub(
+                rtpath_name,
+                None,
+                path,
+                work_path,
+                season_id,
+            )
+        else:
+            logger.info(f'[处理任务] 开始对 [文件夹] {path.name}处理')
+            repeat = find_unique_parts_in_videos(path)
+            for item_path in path.iterdir():
+                logger.info(f'[处理任务] 处理嵌套文件夹 {item_path.name}')
+                if item_path.is_dir():
+                    repeat_2 = find_unique_parts_in_videos(item_path)
+                    for sub_item in item_path.iterdir():
+                        self.process_sub(
+                            rtpath_name,
+                            repeat_2,
+                            sub_item,
+                            work_path,
+                            season_id,
+                        )
+                else:
+                    self.process_sub(
+                        rtpath_name,
+                        repeat,
+                        item_path,
+                        work_path,
+                        season_id,
+                    )
 
     def error_reply(
         self,
