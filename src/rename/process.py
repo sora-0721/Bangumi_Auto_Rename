@@ -309,11 +309,19 @@ class Rename:
         pos = 0
         logger.info('[处理任务] 未传入任务类型，开始判断该文件是否为电影！')
 
-        s1_name, s1_info = self.search.get_tv_info(rtpath_name, year)
-        logger.info(f'[处理任务] 搜索到的电视剧名称: {s1_name}')
-        if not s1_name and year != 0:
-            s1_name, s1_info = self.search.get_tv_info(rtpath_name, 0)
-            logger.info(f'[处理任务] 未搜索到结果, 删除year后重试: {s1_name}')
+        # 对于动漫，使用详细的季度信息获取函数
+        if is_anime:
+            s1_name, s1_info = self.search.get_tv_info_with_seasons(rtpath_name, year)
+            logger.info(f'[处理任务] 搜索到的动漫电视剧名称: {s1_name}')
+            if not s1_name and year != 0:
+                s1_name, s1_info = self.search.get_tv_info_with_seasons(rtpath_name, 0)
+                logger.info(f'[处理任务] 未搜索到结果, 删除year后重试: {s1_name}')
+        else:
+            s1_name, s1_info = self.search.get_tv_info(rtpath_name, year)
+            logger.info(f'[处理任务] 搜索到的电视剧名称: {s1_name}')
+            if not s1_name and year != 0:
+                s1_name, s1_info = self.search.get_tv_info(rtpath_name, 0)
+                logger.info(f'[处理任务] 未搜索到结果, 删除year后重试: {s1_name}')
 
         s2_name, s2_info = self.search.get_movie_info(rtpath_name, year)
         logger.info(f'[处理任务] 搜索到的电影名称: {s2_name}')
@@ -471,10 +479,12 @@ class Rename:
         task_data = {
             'path': str(path),
             'is_anime': is_anime,
+            'is_movie': is_movie,
             'name': name,
             'season_id': season_id,
             'uuid': str(_uuid),
             'error': None,
+            'use_ai': is_anime and self.ai_processor.ai_client.is_available(),
         }
         trans_result = Trans(self.R, _uuid).trans_file()
         self.R = {}
