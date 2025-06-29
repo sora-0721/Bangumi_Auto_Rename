@@ -27,7 +27,7 @@ class AIProcessor:
         Args:
             path: 本地文件路径
             anime_info: TMDB动漫信息
-            season_info: 特定季度信息
+            season_info: 特定季度信息（可选）
             
         Returns:
             验证后的AI分析结果
@@ -51,10 +51,10 @@ class AIProcessor:
         )
         
         if ai_result:
-            logger.info(f'[AI处理] AI分析完成，置信度: {ai_result.confidence:.2f}')
+            logger.info(f'[AI处理] AI分析完成，置信度: {ai_result.confidence}')
             
             # 记录低置信度结果到单独日志
-            if ai_result.confidence < self.ai_client.confidence_threshold:
+            if ai_result.confidence == 'Low':
                 self._log_low_confidence_result(path, ai_result)
         
         return ai_result
@@ -84,7 +84,9 @@ class AIProcessor:
         try:
             # 记录季度映射信息
             if ai_result.season_mapping:
-                logger.info(f'[AI处理] 季度映射: {ai_result.season_mapping}')
+                logger.info('[AI处理] 季度映射:')
+                for season_map in ai_result.season_mapping:
+                    logger.info(f'  {season_map.local_group_name} -> TMDB季度: {season_map.maps_to_tmdb_seasons}')
             
             for mapping in ai_result.mapping:
                 local_file = mapping.local_file
@@ -126,7 +128,7 @@ class AIProcessor:
                 
                 logger.info(
                     f'[AI处理] AI映射: {source_path.name} -> {new_filename} '
-                    f'(类型: {episode_type}, 置信度: {confidence:.2f})'
+                    f'(类型: {episode_type}, 置信度: {confidence})'
                 )
         
         except Exception as e:
@@ -155,21 +157,22 @@ class AIProcessor:
         reason = ai_result.reason
         
         logger.warning(
-            f'[AI低置信度] 路径: {path} | 置信度: {confidence:.2f} | '
+            f'[AI低置信度] 路径: {path} | 置信度: {confidence} | '
             f'理由: {reason} | 映射数量: {len(ai_result.mapping)}'
         )
         
         # 记录季度映射
         if ai_result.season_mapping:
-            logger.warning(f'[AI低置信度] 季度映射: {ai_result.season_mapping}')
+            for season_map in ai_result.season_mapping:
+                logger.warning(f'[AI低置信度] 季度映射: {season_map.local_group_name} -> {season_map.maps_to_tmdb_seasons}')
         
         # 详细记录每个映射的置信度
         for mapping in ai_result.mapping:
-            if mapping.confidence < self.ai_client.confidence_threshold:
+            if mapping.confidence == 'Low':
                 logger.warning(
                     f'[AI低置信度文件] {mapping.local_file} -> '
                     f'S{mapping.tmdb_season:02d}E{mapping.tmdb_episode:02d} '
-                    f'(类型: {mapping.episode_type}, 置信度: {mapping.confidence:.2f})'
+                    f'(类型: {mapping.episode_type}, 置信度: {mapping.confidence})'
                 )
         
         # 记录特殊说明

@@ -2,6 +2,27 @@ from typing import Dict, List, Optional, Union, Literal
 from pydantic import BaseModel, Field, validator
 
 
+class SeasonMapping(BaseModel):
+    """季度映射对象"""
+    local_group_name: str = Field(..., description="本地组名称，例如目录名")
+    maps_to_tmdb_seasons: List[int] = Field(..., description="对应的TMDB季度列表")
+
+    @validator('maps_to_tmdb_seasons')
+    def validate_tmdb_seasons(cls, v):
+        """验证TMDB季度列表"""
+        if not isinstance(v, list):
+            raise ValueError("maps_to_tmdb_seasons必须是列表类型")
+        
+        if not v:
+            raise ValueError("maps_to_tmdb_seasons不能为空")
+        
+        for season in v:
+            if not isinstance(season, int) or season < 0:
+                raise ValueError(f"季度号必须是非负整数: {season}")
+        
+        return v
+
+
 class EpisodeMapping(BaseModel):
     """单个剧集映射"""
     local_file: str = Field(..., description="本地文件名")
@@ -10,16 +31,18 @@ class EpisodeMapping(BaseModel):
     episode_type: Literal["regular", "special", "ova", "movie"] = Field(
         default="regular", description="剧集类型"
     )
-    confidence: float = Field(..., ge=0.0, le=1.0, description="置信度")
+    confidence: Literal["High", "Medium", "Low"] = Field(
+        default="Medium", description="置信度等级"
+    )
 
 
 class AIAnalysisResult(BaseModel):
     """AI分析结果"""
-    confidence: float = Field(..., ge=0.0, le=1.0, description="总体置信度")
+    confidence: Literal["High", "Medium", "Low"] = Field(..., description="总体置信度等级")
     reason: str = Field(..., description="分析理由说明")
-    season_mapping: Dict[str, Union[int, List[int]]] = Field(
-        default_factory=dict, 
-        description="季度映射，本地季对应TMDB季的映射关系"
+    season_mapping: List[SeasonMapping] = Field(
+        default_factory=list, 
+        description="季度映射列表"
     )
     mapping: List[EpisodeMapping] = Field(
         default_factory=list, description="剧集映射列表"
@@ -28,34 +51,11 @@ class AIAnalysisResult(BaseModel):
         default=None, description="特殊情况说明"
     )
 
-    @validator('season_mapping')
-    def validate_season_mapping(cls, v):
-        """验证season_mapping格式"""
-        if not isinstance(v, dict):
-            raise ValueError("season_mapping必须是字典类型")
-        
-        for key, value in v.items():
-            # 键必须是字符串格式的本地季号
-            if not key.startswith('local_season_'):
-                raise ValueError(f"season_mapping的键必须以'local_season_'开头: {key}")
-            
-            # 值必须是整数或整数列表
-            if isinstance(value, int):
-                if value < 0:
-                    raise ValueError(f"季号不能为负数: {value}")
-            elif isinstance(value, list):
-                if not all(isinstance(x, int) and x >= 0 for x in value):
-                    raise ValueError(f"季号列表必须包含非负整数: {value}")
-            else:
-                raise ValueError(f"season_mapping的值必须是整数或整数列表: {value}")
-        
-        return v
-
     @validator('mapping')
     def validate_mapping_not_empty(cls, v, values):
         """验证映射列表不为空（当置信度足够高时）"""
-        confidence = values.get('confidence', 0)
-        if confidence > 0.5 and not v:
+        confidence = values.get('confidence', 'Low')
+        if confidence in ['High', 'Medium'] and not v:
             raise ValueError("高置信度结果必须包含映射信息")
         return v
 

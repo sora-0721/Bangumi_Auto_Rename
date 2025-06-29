@@ -66,16 +66,13 @@ class ConfigPage(ui.dialog):
                         tg.style('font-size: 10px')
                         tg.classes('flex no-wrap w-full')
                     elif cn == 'ai_confidence_threshold':
-                        ui.number(
-                            value=float(cm.get_config(cn)) if cm.get_config(cn) else 0.7,
-                            min=0.0,
-                            max=1.0,
-                            step=0.1,
-                            format='%.1f',
+                        tg = RedToogle(
+                            ['High', 'Medium', 'Low'],
+                            value=cm.get_config(cn),
                             on_change=lambda e, c=cn: self._change(c, e.value),
-                        ).props('filled').props('dense').style('flex-grow: 2').bind_value(
-                            self.config, cn
                         )
+                        tg.style('font-size: 10px')
+                        tg.classes('flex no-wrap w-full')
                     else:
                         ui.input(
                             value=cm.get_config(cn),

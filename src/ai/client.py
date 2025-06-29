@@ -6,7 +6,7 @@ from pydantic import ValidationError
 
 from ..logger import logger
 from ..config.config_manager import cm
-from .models import AIAnalysisResult, EpisodeMapping
+from .models import AIAnalysisResult, EpisodeMapping, SeasonMapping
 
 
 class AIClient:
@@ -15,7 +15,7 @@ class AIClient:
         self.base_url = cm.get_config('ai_base_url')
         self.model = cm.get_config('ai_model')
         self.enabled = cm.get_config('ai_enabled')
-        self.confidence_threshold = float(cm.get_config('ai_confidence_threshold') or 0.7)
+        self.confidence_threshold = cm.get_config('ai_confidence_threshold')
         
         if self.enabled and self.api_key:
             self.client = OpenAI(
@@ -47,7 +47,7 @@ class AIClient:
         try:
             # 使用Pydantic验证和解析
             result = AIAnalysisResult(**json_data)
-            logger.info(f'[AI识别] JSON结构验证成功，置信度: {result.confidence:.2f}')
+            logger.info(f'[AI识别] JSON结构验证成功，置信度: {result.confidence}')
             return result
         except ValidationError as e:
             logger.error(f'[AI识别] JSON结构验证失败: {e}')
@@ -166,13 +166,12 @@ class AIClient:
                 return None
             
             # 记录低置信度结果
-            if result.confidence < self.confidence_threshold:
+            if result.confidence == 'Low':
                 logger.warning(
-                    f'[AI识别] 低置信度结果 (置信度: {result.confidence:.2f}): '
-                    f'{result.reason}'
+                    f'[AI识别] 低置信度结果: {result.reason}'
                 )
             
-            logger.info(f'[AI识别] 分析完成，置信度: {result.confidence:.2f}')
+            logger.info(f'[AI识别] 分析完成，置信度: {result.confidence}')
             return result
             
         except Exception as e:
@@ -228,30 +227,35 @@ class AIClient:
 
 请严格按照以下JSON格式返回分析结果：
 {{
-    "confidence": 0.85,
+    "confidence": "High",
     "reason": "分析理由说明",
-    "season_mapping": {{
-        "local_season_1": 1,
-        "local_season_2": [2, 3]
-    }},
+    "season_mapping": [
+        {{
+            "local_group_name": "JUJUTSU_KAISEN_VOL1",
+            "maps_to_tmdb_seasons": [1]
+        }},
+        {{
+            "local_group_name": "JUJUTSU_KAISEN_VOL2", 
+            "maps_to_tmdb_seasons": [2, 3]
+        }}
+    ],
     "mapping": [
         {{
             "local_file": "文件名",
             "tmdb_season": 1,
             "tmdb_episode": 1,
             "episode_type": "regular",
-            "confidence": 0.9
+            "confidence": "High"
         }}
     ],
     "special_notes": "特殊情况说明"
 }}
 
 注意事项：
-- season_mapping中的键必须是"local_season_X"格式
-- season_mapping中的值可以是单个整数或整数列表
-- 本地的一个季可能对应TMDB的多个季（值为列表）
-- 本地的多个季可能对应TMDB的一个季（多个键对应同一个值）
+- confidence只能是: "High", "Medium", "Low"
+- local_group_name应该是从文件扫描中获得的实际目录名或组名
+- maps_to_tmdb_seasons是整数数组，表示本地组对应的TMDB季度
 - episode_type只能是: "regular", "special", "ova", "movie"
-- 所有confidence值必须在0.0-1.0之间
+- 所有confidence值必须是枚举值之一
 """
         return prompt

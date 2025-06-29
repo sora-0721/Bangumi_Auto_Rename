@@ -15,7 +15,7 @@ CONFIG_DEFAULT = {
     'ai_base_url': 'https://api.openai.com/v1',
     'ai_model': 'gpt-4o-mini',
     'ai_enabled': False,
-    'ai_confidence_threshold': 0.7,
+    'ai_confidence_threshold': 'Medium',
 }
 
 CN_MAP = {

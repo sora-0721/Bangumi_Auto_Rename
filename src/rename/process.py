@@ -462,7 +462,19 @@ class Rename:
                         path, tv_info, None
                     )
                     
-                    if ai_result and ai_result.confidence >= self.ai_processor.ai_client.confidence_threshold:
+                    # 检查AI置信度阈值
+                    confidence_threshold = cm.get_config('ai_confidence_threshold')
+                    should_use_ai = False
+                    
+                    if ai_result:
+                        if confidence_threshold == 'High' and ai_result.confidence == 'High':
+                            should_use_ai = True
+                        elif confidence_threshold == 'Medium' and ai_result.confidence in ['High', 'Medium']:
+                            should_use_ai = True
+                        elif confidence_threshold == 'Low':
+                            should_use_ai = True
+                    
+                    if should_use_ai:
                         logger.info('[处理任务] 使用AI分析结果进行文件映射')
                         # 先进行传统处理获得基础映射
                         self._process_traditional(path, rtpath_name, work_path, season_id)
