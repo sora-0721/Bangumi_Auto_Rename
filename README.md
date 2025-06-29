@@ -60,9 +60,9 @@
 > [!IMPORTANT] 
 >
 > WEB版本提高了易用性、和识别准确率, 但要求必须本机内存在git和python环境！
-> 新版本需要安装ffmpeg用于视频分析功能。
+> 新版本需要安装hachoir-metadata用于视频分析功能。
 
-- 确保存在Python环境（版本需要`>=3.9`）, Git环境，FFmpeg环境。
+- 确保存在Python环境（版本需要`>=3.9`）, Git环境。
 - 命令行执行
   - `git clone https://github.com/KimigaiiWuyi/Bangumi_Auto_Rename.git -b web`
   - `cd Bangumi_Auto_Rename`
