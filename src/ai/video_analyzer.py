@@ -1,12 +1,12 @@
+import ffmpeg
 from pathlib import Path
 from typing import Dict, List, Optional
-from tinytag import TinyTag
 
 from ..logger import logger
 
 
 class VideoAnalyzer:
-    """视频文件分析器，使用tinytag获取视频时长等信息"""
+    """视频文件分析器，用于获取视频时长等信息"""
     
     @staticmethod
     def get_video_duration(file_path: Path) -> Optional[float]:
@@ -20,10 +20,9 @@ class VideoAnalyzer:
             视频时长（分钟），失败返回None
         """
         try:
-            tag = TinyTag.get(str(file_path))
-            if tag.duration:
-                return tag.duration / 60.0  # 转换为分钟
-            return None
+            probe = ffmpeg.probe(str(file_path))
+            duration = float(probe['streams'][0]['duration'])
+            return duration / 60.0  # 转换为分钟
         except Exception as e:
             logger.warning(f'[视频分析] 无法获取 {file_path.name} 的时长: {str(e)}')
             return None
@@ -69,21 +68,39 @@ class VideoAnalyzer:
             视频信息字典
         """
         try:
-            tag = TinyTag.get(str(file_path))
+            probe = ffmpeg.probe(str(file_path))
+            
+            video_stream = None
+            audio_stream = None
+            
+            for stream in probe['streams']:
+                if stream['codec_type'] == 'video' and video_stream is None:
+                    video_stream = stream
+                elif stream['codec_type'] == 'audio' and audio_stream is None:
+                    audio_stream = stream
             
             info = {
                 'filename': file_path.name,
                 'path': str(file_path),
                 'size': file_path.stat().st_size,
-                'duration': tag.duration / 60.0 if tag.duration else None,
-                'bitrate': tag.bitrate,
-                'width': getattr(tag, 'width', None),
-                'height': getattr(tag, 'height', None),
-                'video_codec': getattr(tag, 'video_codec', None),
-                'audio_codec': getattr(tag, 'audio_codec', None),
-                'channels': getattr(tag, 'channels', None),
-                'samplerate': getattr(tag, 'samplerate', None),
+                'duration': float(probe['format']['duration']) / 60.0 if 'duration' in probe['format'] else None,
+                'bitrate': int(probe['format']['bit_rate']) if 'bit_rate' in probe['format'] else None,
             }
+            
+            if video_stream:
+                info.update({
+                    'width': video_stream.get('width'),
+                    'height': video_stream.get('height'),
+                    'video_codec': video_stream.get('codec_name'),
+                    'fps': eval(video_stream.get('r_frame_rate', '0/1'))
+                })
+            
+            if audio_stream:
+                info.update({
+                    'audio_codec': audio_stream.get('codec_name'),
+                    'audio_channels': audio_stream.get('channels'),
+                    'sample_rate': audio_stream.get('sample_rate')
+                })
             
             return info
             
